@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "astronomy-engine": "^2.1.19",
-    "p5": "^1.11.0"
+    "p5": "^1.11.0",
+    "tz-lookup": "^6.1.25"
   },
   "devDependencies": {
     "vite": "^5.4.0"

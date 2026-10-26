@@ -1,9 +1,10 @@
 import p5 from 'p5';
+import tzlookup from 'tz-lookup';
 import * as Astronomy from 'astronomy-engine';
 import './style.css';
 import { CONST_PT, CONST_DESC, ZODIAC, STAR_INFO, NEARBY_EXTRA, BODIES } from './data.js';
 
-const DEFAULTS = { latitude: -23.55, longitude: -46.63, elevation: 760, location: 'São Paulo, SP, Brasil', date: '2026-10-20', time: '22:00' };
+const DEFAULTS = { latitude: -23.55, longitude: -46.63, elevation: 760, location: 'São Paulo, SP, Brasil', tz: 'America/Sao_Paulo', date: '2026-10-20', time: '22:00' };
 const DATA_URL = `${import.meta.env.BASE_URL}data/`;
 const COMPASS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
 const AU_KM = 149597870.7;
@@ -18,7 +19,40 @@ let catalog = null, sky = null, loadError = null;
 let selected = null, hovered = null, pointer = { x: 0, y: 0 };
 let touchScale = 1;
 
-const observationDate = () => new Date(`${observation.date}T${observation.time}:00-03:00`);
+/* ---------- Fuso horário da cidade ---------- */
+// Diferença (em minutos) entre o horário local do fuso e o UTC, em um instante dado. Inclui horário de verão.
+function tzOffsetMinutes(tz, utcMs) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(new Date(utcMs));
+  const v = Object.fromEntries(parts.map(q => [q.type, q.value]));
+  const asUtc = Date.UTC(+v.year, +v.month - 1, +v.day, +v.hour, +v.minute, +v.second);
+  return Math.round((asUtc - Math.floor(utcMs / 1000) * 1000) / 60000);
+}
+
+// Converte "data + horário na parede do relógio da cidade" para o instante real (UTC).
+function zonedToUtc(dateStr, timeStr, tz) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = timeStr.split(':').map(Number);
+  const naive = Date.UTC(y, m - 1, d, hh, mm);
+  let ms = naive - tzOffsetMinutes(tz, naive) * 60000;
+  ms = naive - tzOffsetMinutes(tz, ms) * 60000; // segunda passada acerta a virada do horário de verão
+  return new Date(ms);
+}
+
+const utcLabel = (tz, date) => {
+  const min = tzOffsetMinutes(tz, date.getTime()), sign = min < 0 ? '-' : '+', a = Math.abs(min);
+  const h = Math.floor(a / 60), m = a % 60;
+  return `UTC${sign}${h}${m ? ':' + String(m).padStart(2, '0') : ''}`;
+};
+
+const timezoneFor = (lat, lon) => { try { return tzlookup(lat, lon); } catch { return DEFAULTS.tz; } };
+
+const observationDate = () => {
+  try { return zonedToUtc(observation.date, observation.time, observation.tz); }
+  catch { return new Date(`${observation.date}T${observation.time}:00-03:00`); }
+};
 
 /* ---------- Geocodificação de Cidades do Mundo ---------- */
 async function fetchCoordinates(cityName) {
@@ -103,8 +137,10 @@ function updateMeta() {
   $('sky-caption').textContent = `${formattedDateString} · ${observation.time} · ${observation.location}`;
   $('meta-location').textContent = observation.location;
   
-  const d = observationDate();
-  $('meta-datetime').textContent = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(d);
+  // Data e hora na parede do relógio da cidade (não no fuso do aparelho).
+  const shortDate = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(localDate);
+  $('meta-datetime').textContent = `${shortDate}, ${observation.time}`;
+  $('meta-tz').textContent = `${observation.tz.replaceAll('_', ' ')} (${utcLabel(observation.tz, observationDate())})`;
 }
 
 const moonPhaseName = a => ['Lua nova', 'Lua crescente', 'Quarto crescente', 'Crescente gibosa', 'Lua cheia', 'Minguante gibosa', 'Quarto minguante', 'Lua minguante'][Math.round(a / 45) % 8];
@@ -519,6 +555,7 @@ $('update-sky').addEventListener('click', async () => {
 
   const coords = await fetchCoordinates(cityQuery);
   if (coords) {
+    observation.tz = timezoneFor(coords.latitude, coords.longitude);
     observation.latitude = coords.latitude;
     observation.longitude = coords.longitude;
     observation.location = cityQuery;
