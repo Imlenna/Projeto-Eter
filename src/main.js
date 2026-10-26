@@ -4,7 +4,7 @@ import './style.css';
 import { CONST_PT, CONST_DESC, ZODIAC, STAR_INFO, NEARBY_EXTRA, BODIES } from './data.js';
 
 const DEFAULTS = { latitude: -23.55, longitude: -46.63, elevation: 760, location: 'São Paulo, SP, Brasil', date: '2026-10-20', time: '22:00' };
-const DATA_URL = `${import.meta.env.BASE_URL}data/`; // arquivos do d3-celestial em public/data
+const DATA_URL = `${import.meta.env.BASE_URL}data/`;
 const COMPASS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
 const AU_KM = 149597870.7;
 
@@ -16,10 +16,30 @@ const conName = sym => CONST_PT[sym] || sym;
 let observation = { ...DEFAULTS };
 let catalog = null, sky = null, loadError = null;
 let selected = null, hovered = null, pointer = { x: 0, y: 0 };
-let touchScale = 1; // aumenta a área de acerto quando é o dedo
+let touchScale = 1;
 
-// Horário interpretado como UTC-3 (São Paulo), independente do fuso do visitante.
 const observationDate = () => new Date(`${observation.date}T${observation.time}:00-03:00`);
+
+/* ---------- Geocodificação de Cidades do Mundo ---------- */
+async function fetchCoordinates(cityName) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cityName)}`, {
+      headers: { 'User-Agent': 'MapaCelesteApp/1.0' }
+    });
+    const data = await res.json();
+    if (data && data.length > 0) {
+      return {
+        latitude: parseFloat(data[0].lat),
+        longitude: parseFloat(data[0].lon)
+      };
+    }
+    throw new Error('Local não encontrado');
+  } catch (err) {
+    console.warn('Erro ao buscar coordenadas, mantendo anterior:', err);
+    alert('Não foi possível localizar esta cidade. Verifique o nome e tente novamente.');
+    return null;
+  }
+}
 
 /* ---------- Catálogo ---------- */
 async function loadCatalog() {
@@ -27,7 +47,6 @@ async function loadCatalog() {
   const [stars, lines, cons] = await Promise.all(
     files.map(f => fetch(DATA_URL + f).then(r => { if (!r.ok) throw new Error(`Falha ao carregar ${f}`); return r.json(); }))
   );
-  // d3-celestial guarda a ascensão reta em graus (-180..180) e a declinação em graus.
   const toRaDec = ([lon, lat]) => ({ ra: ((lon + 360) % 360) / 15, dec: lat });
   catalog = {
     stars: stars.features.map(f => {
@@ -41,7 +60,6 @@ async function loadCatalog() {
 
 /* ---------- Astronomia ---------- */
 function horizonOf(ra, dec, ctx) {
-  // Coordenadas J2000 -> equador da data (precessão) -> horizonte local.
   const v = Astronomy.VectorFromSphere(new Astronomy.Spherical(dec, ra * 15, 1), ctx.time);
   const eq = Astronomy.EquatorFromVector(Astronomy.RotateVector(ctx.rot, v));
   const h = Astronomy.Horizon(ctx.time, ctx.observer, eq.ra, eq.dec, 'normal');
@@ -76,12 +94,17 @@ function buildSky() {
   updateMeta(); showInfo(null);
 }
 
-/* ---------- Painel de informações ---------- */
+/* ---------- Painel de informações e Fuso Horário Correto ---------- */
 function updateMeta() {
-  const d = observationDate();
-  $('sky-caption').textContent = `${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeZone: 'America/Sao_Paulo' }).format(d)} · ${observation.time} · ${observation.location}`;
+  const [year, month, day] = observation.date.split('-').map(Number);
+  const localDate = new Date(year, month - 1, day);
+  const formattedDateString = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long' }).format(localDate);
+
+  $('sky-caption').textContent = `${formattedDateString} · ${observation.time} · ${observation.location}`;
   $('meta-location').textContent = observation.location;
-  $('meta-datetime').textContent = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(d);
+  
+  const d = observationDate();
+  $('meta-datetime').textContent = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(d);
 }
 
 const moonPhaseName = a => ['Lua nova', 'Lua crescente', 'Quarto crescente', 'Crescente gibosa', 'Lua cheia', 'Minguante gibosa', 'Quarto minguante', 'Lua minguante'][Math.round(a / 45) % 8];
@@ -98,8 +121,7 @@ function describe(o) {
     add('Nome em inglês', o.en);
     add('Zodíaco', ZODIAC.has(sym) ? 'Sim' : 'Não');
     add('Posição agora', whereText(o));
-    return { kind: 'Constelação', title: conName(sym), facts,
-      text: CONST_DESC[sym] || `${conName(sym)} é uma das 88 constelações oficiais da União Astronômica Internacional (IAU). Cada uma delimita uma região do céu, e as linhas ligam suas estrelas mais brilhantes.` };
+    return { kind: 'Constelação', title: conName(sym), facts, text: CONST_DESC[sym] || `${conName(sym)} é uma das 88 constelações oficiais.` };
   }
 
   if (o.kind === 'body') {
@@ -122,7 +144,7 @@ function describe(o) {
     add('Classe espectral', o.cls);
     add('Constelação', conName(o.con));
     add('Posição agora', whereText(o));
-    return { kind: 'Estrela próxima', title: o.name, text: `${o.desc} Está invisível a olho nu.`, facts };
+    return { kind: 'Estrela próxima', title: o.name, text: `${o.desc} Invisível a olho nu.`, facts };
   }
 
   const info = STAR_INFO[o.hip];
@@ -134,7 +156,7 @@ function describe(o) {
   add('Classe espectral', info?.cls);
   add('Posição agora', whereText(o));
   const title = info?.name || `HIP ${o.hip}`;
-  let text = info?.desc || `Estrela do catálogo Hipparcos (HIP ${o.hip}) na constelação ${conName(sym)}.`;
+  let text = info?.desc || `Estrela do catálogo Hipparcos (HIP ${o.hip}).`;
   if (near) text += ` Está entre as estrelas mais próximas do Sol.`;
   return { kind: near ? 'Estrela próxima' : 'Estrela', title, text, facts };
 }
@@ -145,7 +167,7 @@ function showInfo(o) {
   if (!o) {
     $('object-kind').textContent = 'OBJETO SELECIONADO';
     $('object-name').textContent = 'Explore o mapa';
-    $('object-description').textContent = 'Clique em um planeta, constelação ou estrela próxima. No celular, toque no objeto; use dois dedos ou os botões + e − para ampliar.';
+    $('object-description').textContent = 'Clique em um planeta, constelação ou estrela próxima. No celular, use dois dedos ou os botões + e − para ampliar.';
     return;
   }
   const d = describe(o);
@@ -159,7 +181,7 @@ function showInfo(o) {
   }
 }
 
-/* ---------- Desenho ---------- */
+/* ---------- Desenho e Suporte Web/Tablet ---------- */
 function sketch(p) {
   let c = 0, r = 0, k = 1;
   let hits = { bodies: [], nearby: [], bright: [], stars: [], labels: [] }, segs = [];
@@ -181,21 +203,27 @@ function sketch(p) {
     const d = r * (90 - o.alt) / 90, a = o.az * Math.PI / 180;
     return { x: c + (-d * Math.sin(a)) * zoom + panX, y: c + (-d * Math.cos(a)) * zoom + panY };
   };
+  
   const canvasWidth = () => {
     const box = $('sky-canvas').clientWidth || 600;
-    const landscapePhone = matchMedia('(orientation: landscape) and (max-height: 500px)').matches;
-    const cap = landscapePhone ? Math.min(screen.width, screen.height) - 70 : 760;
-    return Math.max(260, Math.min(box, cap));
+    return Math.max(280, box - 16);
   };
 
   p.setup = () => {
     const cv = p.createCanvas(canvasWidth(), canvasWidth());
     cv.parent('sky-canvas');
-    p.pixelDensity(Math.min(devicePixelRatio || 1, 3));
-    p.textFont('Manrope, sans-serif');
+    p.pixelDensity(Math.min(devicePixelRatio || 1, 2));
     p.noLoop();
     const el = cv.elt;
-    const toLocal = e => { const b = el.getBoundingClientRect(); return { x: (e.clientX - b.left) * p.width / b.width, y: (e.clientY - b.top) * p.height / b.height }; };
+    
+    const toLocal = e => {
+      const b = el.getBoundingClientRect();
+      return {
+        x: (e.clientX - b.left) * (p.width / b.width),
+        y: (e.clientY - b.top) * (p.height / b.height)
+      };
+    };
+
     const pts = new Map();           // dedos/ponteiros ativos
     let tapStart = null, dragged = false, multi = false, pinch = null;
     const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -240,9 +268,9 @@ function sketch(p) {
       pinch = null;
       if (pts.size === 1) { tapStart = [...pts.values()][0]; dragged = true; } // sobrou um dedo: não é toque
       if (pts.size > 0) return;
-      // Toque curto, sem arrastar nem pinça: seleciona.
+      // Toque curto, sem arrastar nem pinça: seleciona. Com zoom a área de toque encolhe, pois os objetos já estão afastados.
       if (e.type === 'pointerup' && !dragged && !multi) {
-        touchScale = e.pointerType === 'touch' ? 2 : 1;
+        touchScale = e.pointerType === 'touch' ? (zoom > 1.5 ? 2 : 3.5) : 1;
         pointer = pos; selected = pick(pos.x, pos.y); hovered = null; viewMoved = false;
         showInfo(selected);
       }
@@ -258,14 +286,18 @@ function sketch(p) {
       zoomAt(pos.x, pos.y, zoom * Math.exp(-e.deltaY * 0.0015));
       setCursor(); p.redraw();
     }, { passive: false });
-    ['toggle-lines', 'toggle-names', 'toggle-nearby'].forEach(id => $(id)?.addEventListener('change', () => p.redraw()));
+
+    ['toggle-lines', 'toggle-names', 'toggle-planets', 'toggle-sunmoon', 'toggle-nearby'].forEach(id => $(id)?.addEventListener('change', () => p.redraw()));
     loadCatalog().then(() => { buildSky(); p.redraw(); }).catch(err => { loadError = err; p.redraw(); });
   };
 
   p.draw = () => {
     c = p.width / 2; r = p.width * 0.435; k = p.width / 600;
     const compact = p.width < 520;
+    
+    p.textFont('Manrope, sans-serif');
     const fs = () => (compact ? 10 : Math.max(9, 10 * k));
+    
     p.background('#050711');
 
     p.noFill(); p.stroke('#59617d'); p.strokeWeight(1); p.circle(c, c, r * 2);
@@ -274,7 +306,7 @@ function sketch(p) {
 
     if (!sky) {
       p.fill('#8f98b5'); p.textSize(13);
-      p.text(loadError ? 'Não foi possível carregar o catálogo de estrelas.' : 'Carregando catálogo de estrelas…', c, c);
+      p.text(loadError ? 'Não foi possível carregar o catálogo.' : 'Carregando catálogo de estrelas…', c, c);
       return;
     }
 
@@ -284,11 +316,10 @@ function sketch(p) {
     const ctx = p.drawingContext;
     ctx.save(); ctx.beginPath(); ctx.arc(c, c, r - 0.5, 0, Math.PI * 2); ctx.clip();
 
-    // Linhas das constelações
     if (flag('toggle-lines')) {
       for (const con of sky.lines) {
         const active = focus?.kind === 'constellation' && focus.id === con.id;
-        if (active) { p.stroke('#f7d783'); p.strokeWeight(1.8); } else { p.stroke(150, 170, 230, 95); p.strokeWeight(0.9); }
+        if (active) { p.stroke('#f7d783'); p.strokeWeight(2.3); } else { p.stroke(150, 170, 230, 110); p.strokeWeight(1.4); }
         for (const line of con.segs) {
           for (let i = 1; i < line.length; i++) {
             const a = line[i - 1], b = line[i];
@@ -301,7 +332,6 @@ function sketch(p) {
       }
     }
 
-    // Estrelas
     p.noStroke();
     for (const s of sky.stars) {
       if (s.alt < 0) continue;
@@ -314,12 +344,11 @@ function sketch(p) {
       const info = STAR_INFO[s.hip];
       const near = info && info.ly <= 26;
       const h = { obj: s, x: pos.x, y: pos.y, reach: Math.max(8, size / 2 + 5) };
-      if (near) hits.bright.push(h); // só as estrelas próximas são clicáveis; as demais são apenas visuais
+      if (near) hits.bright.push(h);
       if (near && flag('toggle-nearby')) { p.noFill(); p.stroke('#7fe3d2'); p.strokeWeight(1); p.circle(pos.x, pos.y, size + 8); p.noStroke(); }
       if (flag('toggle-names') && info && s.mag < (compact ? 1.2 : 2.3)) queue.push({ text: info.name.split(' (')[0], x: pos.x + size / 2 + 5, y: pos.y - 5, align: 'left', size: fs(), fill: [232, 236, 255, 190], prio: 2 });
     }
 
-    // Estrelas próximas fracas (fora da lista Hipparcos 6)
     if (flag('toggle-nearby')) {
       for (const n of sky.nearby) {
         if (n.alt < 0) continue;
@@ -332,7 +361,6 @@ function sketch(p) {
       }
     }
 
-    // Nomes das constelações (colocados depois, sem sobrepor outros rótulos)
     if (flag('toggle-names')) {
       for (const l of sky.labels) {
         if (l.alt < 3) continue;
@@ -342,9 +370,13 @@ function sketch(p) {
       }
     }
 
-    // Planetas, Lua e Sol
+    // Renderização separada para Planetas e para Sol/Lua
     for (const b of sky.bodies) {
+      const isSunMoon = b.body === 'Sun' || b.body === 'Moon';
+      if (isSunMoon && !flag('toggle-sunmoon')) continue;
+      if (!isSunMoon && !flag('toggle-planets')) continue;
       if (b.alt < 0) continue;
+
       const pos = project(b), size = b.size * k * 0.9;
       if (!inView(pos.x, pos.y, 8)) continue;
       p.noStroke(); p.fill(b.color); p.circle(pos.x, pos.y, size);
@@ -352,10 +384,10 @@ function sketch(p) {
       queue.push({ text: b.name, x: pos.x + size / 2 + 6, y: pos.y, align: 'left', size: fs(), fill: [238, 241, 255, 230], prio: 0 });
       hits.bodies.push({ obj: b, x: pos.x, y: pos.y, reach: Math.max(14, size / 2 + 8) });
     }
+
     placeLabels(queue);
     ctx.restore();
 
-    // Destaque do objeto em foco
     if (focus) {
       const h = [...hits.bodies, ...hits.nearby, ...hits.bright, ...hits.stars].find(x => x.obj.id === focus.id);
       if (h) { if (inView(h.x, h.y)) { p.noFill(); p.stroke('#f7d783'); p.strokeWeight(1.3); p.circle(h.x, h.y, 18); tooltip(h.x, h.y, label(focus)); } }
@@ -363,7 +395,6 @@ function sketch(p) {
     }
   };
 
-  // Desenha os rótulos por prioridade e descarta os que sobreporiam outro já colocado.
   function placeLabels(queue) {
     const placed = [];
     const inside = (x, y) => Math.hypot(x - c, y - c) <= r - 2;
@@ -371,6 +402,7 @@ function sketch(p) {
     queue.sort((a, b) => a.prio - b.prio);
     p.noStroke();
     for (const q of queue) {
+      p.textFont('Manrope, sans-serif');
       p.textSize(q.size);
       const w = p.textWidth(q.text), h = q.size * 1.25;
       const steps = q.align === 'center' ? [0, 13, -13, 26, -26] : [0, h, -h];
@@ -393,6 +425,7 @@ function sketch(p) {
   const label = o => (o.kind === 'constellation' ? conName(o.id) : o.kind === 'star' ? (STAR_INFO[o.hip]?.name || `HIP ${o.hip}`) : o.name);
 
   function tooltip(x0, y0, text) {
+    p.textFont('Manrope, sans-serif');
     p.textSize(12); p.textAlign(p.LEFT, p.CENTER);
     const w = Math.min(p.width - 24, p.textWidth(text) + 22), h = 30;
     const x = p.constrain(x0 + 15, 12, p.width - w - 12), y = p.constrain(y0 - h - 12, 12, p.height - h - 12);
@@ -401,7 +434,6 @@ function sketch(p) {
     p.noStroke(); p.fill('#f5f6ff'); p.text(text, x + 11, y + h / 2);
   }
 
-  /* ---------- Seleção por clique ---------- */
   function nearest(list, x, y, bias = () => 0) {
     let best = null, bestScore = Infinity;
     for (const h of list) {
@@ -426,14 +458,23 @@ function sketch(p) {
 
   function pick(x, y) {
     if (!sky || Math.hypot(x - c, y - c) > r + 4) return null;
-    return nearest(hits.bodies, x, y)
+    
+    const pickedBody = nearest(hits.bodies, x, y);
+    let validBody = null;
+    if (pickedBody) {
+      const isSunMoon = pickedBody.body === 'Sun' || pickedBody.body === 'Moon';
+      if ((isSunMoon && flag('toggle-sunmoon')) || (!isSunMoon && flag('toggle-planets'))) {
+        validBody = pickedBody;
+      }
+    }
+
+    return validBody
       ?? nearest(hits.nearby, x, y)
       ?? nearest(hits.bright, x, y, h => h.obj.mag)
       ?? pickConstellation(x, y)
       ?? nearest(hits.labels, x, y);
   }
 
-  // Só recria o canvas se a largura mudou (a barra de endereço do Android dispara resize ao rolar).
   p.windowResized = () => {
     const w = canvasWidth();
     if (w !== p.width) { zoom = 1; panX = 0; panY = 0; p.resizeCanvas(w, w); p.redraw(); }
@@ -447,10 +488,41 @@ const instance = new p5(sketch);
 $('zoom-in').addEventListener('click', () => instance.zoomBy(1.6));
 $('zoom-out').addEventListener('click', () => instance.zoomBy(1 / 1.6));
 $('zoom-reset').addEventListener('click', () => instance.resetView());
-$('update-sky').addEventListener('click', () => {
+
+/* ---------- Gerenciamento do Menu Sanduíche com Bloqueio de Clique no Fundo ---------- */
+const menuBtn = $('menu-btn');
+const dropdownMenu = $('dropdown-menu');
+
+menuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  dropdownMenu.classList.toggle('hidden');
+});
+
+// Impede que cliques e toques dentro do menu suspenso vazem para o canvas/fundo
+['click', 'pointerdown', 'touchstart'].forEach(eventType => {
+  dropdownMenu.addEventListener(eventType, (e) => {
+    e.stopPropagation();
+  });
+});
+
+document.addEventListener('click', (e) => {
+  if (!dropdownMenu.contains(e.target) && e.target !== menuBtn) {
+    dropdownMenu.classList.add('hidden');
+  }
+});
+
+/* ---------- Botão Atualizar Céu & Geocodificação Global ---------- */
+$('update-sky').addEventListener('click', async () => {
+  const cityQuery = $('location').value.trim() || DEFAULTS.location;
   observation.date = $('date').value || DEFAULTS.date;
   observation.time = $('time').value || DEFAULTS.time;
-  observation.location = $('location').value.trim() || DEFAULTS.location;
-  // O campo de cidade ainda é só um rótulo; as coordenadas continuam as de São Paulo.
+
+  const coords = await fetchCoordinates(cityQuery);
+  if (coords) {
+    observation.latitude = coords.latitude;
+    observation.longitude = coords.longitude;
+    observation.location = cityQuery;
+  }
+
   instance.refresh();
 });
