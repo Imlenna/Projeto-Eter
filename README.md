@@ -1,6 +1,8 @@
 # Projeto Éter
 
 Mapa celeste interativo (p5.js + Astronomy Engine). 
+
+##História
 Presente de aniversário atrasado da Broma/Luisa parabéns de novo.
 
 Na mitologia grega, Éter (em grego: Aithêr, é significa algo como "Faz brilhar") é um dos deuses primordiais, personificando o céu superior, o ar puro, brilhante e luminoso que fica acima das nuvens. Na filosifia o conceito de Éter é primariamente como o quinto elemento ou quinta essência (quinta essentia), uma substância divina, imutável e perfeita que preenche os céus, diferenciando-se dos quatro elementos terrestres (terra, água, ar e fogo). A quinta essência para Aristóteles era uma substância pura e imutável que compunha os corpos celestes.
