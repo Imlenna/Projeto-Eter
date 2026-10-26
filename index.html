@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#03030b" />
+  <title>Mapa Celeste</title>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="page-header">
+      <p class="eyebrow">SEU OBSERVATÓRIO PESSOAL</p>
+      <h1>Mapa celeste interativo</h1>
+      <p class="subtitle">O céu é sempre iniciado na data do seu aniversário.</p>
+    </header>
+    
+    <section class="controls" aria-label="Configurações do céu">
+      <label>Cidade <input id="location" value="São Paulo, SP, Brasil" placeholder="Ex: Paris, Tóquio, Nova York" /></label>
+      <label>Data <input id="date" type="date" value="2026-10-20" /></label>
+      <label>Horário <input id="time" type="time" value="22:00" /></label>
+      <button id="update-sky" type="button">Atualizar céu</button>
+    </section>
+
+    <section class="sky-layout">
+      <div class="sky-card">
+        <div class="sky-card-heading">
+          <div>
+            <h2>Seu céu</h2>
+            <p id="sky-caption">20 de outubro de 2026 · 22:00 · São Paulo</p>
+          </div>
+          
+          <!-- Menu Sanduíche com Filtros Separados para Planetas e Sol/Lua -->
+          <div class="menu-container">
+            <button id="menu-btn" class="menu-btn" aria-label="Abrir menu de opções" title="Opções de exibição">☰</button>
+            <div id="dropdown-menu" class="dropdown-menu hidden">
+              <p class="menu-title">Exibição no mapa</p>
+              <label><input type="checkbox" id="toggle-lines" checked /> Constelações</label>
+              <label><input type="checkbox" id="toggle-names" checked /> Nomes</label>
+              <label><input type="checkbox" id="toggle-planets" checked /> Planetas</label>
+              <label><input type="checkbox" id="toggle-sunmoon" checked /> Sol e Lua</label>
+              <label><input type="checkbox" id="toggle-nearby" checked /> Estrelas próximas</label>
+            </div>
+          </div>
+          
+          <span class="live-dot"></span>
+        </div>
+
+        <div id="sky-canvas" class="sky-canvas" aria-label="Mapa celeste interativo"></div>
+        <p class="hint">Clique ou toque em um astro, constelação ou estrela próxima para ver a descrição.</p>
+      </div>
+
+      <aside class="info-card" aria-live="polite">
+        <p class="eyebrow" id="object-kind">OBJETO SELECIONADO</p>
+        <h2 id="object-name">Explore o mapa</h2>
+        <p id="object-description">Selecione um objeto no mapa.</p>
+        <dl id="object-facts" class="facts"></dl>
+        <div class="metadata">
+          <span>Local</span><strong id="meta-location">São Paulo, Brasil</strong>
+          <span>Data e hora</span><strong id="meta-datetime">20/10/2026, 22:00</strong>
+        </div>
+        <p class="small-note">Dados: Hipparcos e d3-celestial. Posições calculadas com Astronomy Engine.</p>
+      </aside>
+    </section>
+    
+    <footer>
+      que esse site te ajude a sempre olhar para o céu na cidade mais nublada do mundo.<br>
+      Feito com p5.js e Astronomy Engine · Criadora Milena Trindade</footer>
+  </main>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
