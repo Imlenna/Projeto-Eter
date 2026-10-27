@@ -218,6 +218,14 @@ h2 { font-size: 18px; letter-spacing: -0.025em; margin: 0; color: #f8fafc; }
   user-select: none;
 }
 
+.download-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.download-actions button:disabled { cursor: wait; opacity: 0.7; }
+
 .hint { color: #cbd5e1; font-size: 12px; margin: 12px 0 0; line-height: 1.5; opacity: 0.85; }
 
 .info-card { padding: 24px; align-self: start; scroll-margin-top: 20px; }
@@ -266,6 +274,7 @@ footer {
   .controls { grid-template-columns: 1fr 1fr; }
   .controls label:first-child { grid-column: 1/-1; }
   .controls > button { grid-column: 1/-1; width: 100%; }
+  .download-actions button { width: 100%; }
 }
 
 @media (max-width: 640px) {

@@ -535,6 +535,41 @@ $('zoom-in').addEventListener('click', () => instance.zoomBy(1.6));
 $('zoom-out').addEventListener('click', () => instance.zoomBy(1 / 1.6));
 $('zoom-reset').addEventListener('click', () => instance.resetView());
 
+$('download-sky').addEventListener('click', () => {
+  const button = $('download-sky');
+  const canvas = $('sky-canvas').querySelector('canvas');
+  if (!canvas) {
+    console.error('Não foi possível encontrar o canvas do céu para exportar.');
+    alert('O mapa do céu ainda não está disponível para download.');
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    canvas.toBlob(blob => {
+      button.disabled = false;
+      if (!blob) {
+        console.error('O navegador não conseguiu gerar o arquivo JPG do céu.');
+        alert('Não foi possível gerar a imagem JPG. Tente novamente.');
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Ceu-${observation.date}_${observation.time.replace(':', '-')}.jpg`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/jpeg', 0.95);
+  } catch (error) {
+    button.disabled = false;
+    console.error('Falha ao exportar o mapa do céu como JPG:', error);
+    alert('Não foi possível gerar a imagem JPG. Tente novamente.');
+  }
+});
+
 /* ---------- Gerenciamento do Menu Sanduíche com Bloqueio de Clique no Fundo ---------- */
 const menuBtn = $('menu-btn');
 const dropdownMenu = $('dropdown-menu');
