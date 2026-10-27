@@ -265,7 +265,7 @@ footer {
   .sky-layout { grid-template-columns: 1fr; }
   .controls { grid-template-columns: 1fr 1fr; }
   .controls label:first-child { grid-column: 1/-1; }
-  .controls button { grid-column: 1/-1; width: 100%; }
+  .controls > button { grid-column: 1/-1; width: 100%; }
 }
 
 @media (max-width: 640px) {
