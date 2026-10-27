@@ -1,5 +1,7 @@
 import p5 from 'p5';
 import tzlookup from 'tz-lookup';
+import { findCity } from './cities.js';
+import { initCityPicker } from './city-picker.js';
 import * as Astronomy from 'astronomy-engine';
 import './style.css';
 import { CONST_PT, CONST_DESC, ZODIAC, STAR_INFO, NEARBY_EXTRA, BODIES } from './data.js';
@@ -20,24 +22,24 @@ let selected = null, hovered = null, pointer = { x: 0, y: 0 };
 let touchScale = 1;
 
 /* ---------- Fuso horário da cidade ---------- */
-// Diferença (em minutos) entre o horário local do fuso e o UTC, em um instante dado. Inclui horário de verão.
+/*timezone e offset de horario de verão*/
 function tzOffsetMinutes(tz, utcMs) {
+  const date = new Date(utcMs);
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit'
-  }).formatToParts(new Date(utcMs));
+  }).formatToParts(date);
   const v = Object.fromEntries(parts.map(q => [q.type, q.value]));
   const asUtc = Date.UTC(+v.year, +v.month - 1, +v.day, +v.hour, +v.minute, +v.second);
   return Math.round((asUtc - Math.floor(utcMs / 1000) * 1000) / 60000);
 }
 
-// Converte "data + horário na parede do relógio da cidade" para o instante real (UTC).
 function zonedToUtc(dateStr, timeStr, tz) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const [hh, mm] = timeStr.split(':').map(Number);
   const naive = Date.UTC(y, m - 1, d, hh, mm);
   let ms = naive - tzOffsetMinutes(tz, naive) * 60000;
-  ms = naive - tzOffsetMinutes(tz, ms) * 60000; // segunda passada acerta a virada do horário de verão
+  ms = naive - tzOffsetMinutes(tz, ms) * 60000; 
   return new Date(ms);
 }
 
@@ -337,8 +339,16 @@ function sketch(p) {
     p.background('#050711');
 
     p.noFill(); p.stroke('#59617d'); p.strokeWeight(1); p.circle(c, c, r * 2);
-    p.noStroke(); p.fill('#929bb9'); p.textAlign(p.CENTER, p.CENTER); p.textSize(Math.max(10, p.width * 0.018));
-    p.text('N', c, c - r - 15); p.text('L', c - r - 15, c); p.text('S', c, c + r + 15); p.text('O', c + r + 15, c);
+    p.noStroke(); 
+    p.fill('#929bb9'); 
+    p.textAlign(p.CENTER, p.CENTER); 
+    p.textSize(Math.max(10, p.width * 0.018));
+    p.textStyle(p.BOLD);
+    p.text('N', c, c - r - 15); 
+    p.text('L', c - r - 15, c); 
+    p.text('S', c, c + r + 15); 
+    p.text('O', c + r + 15, c);
+    p.textStyle(p.NORMAL);
 
     if (!sky) {
       p.fill('#8f98b5'); p.textSize(13);
@@ -553,7 +563,9 @@ $('update-sky').addEventListener('click', async () => {
   observation.date = $('date').value || DEFAULTS.date;
   observation.time = $('time').value || DEFAULTS.time;
 
-  const coords = await fetchCoordinates(cityQuery);
+  // Cidades da lista usam as coordenadas embutidas (sem internet); qualquer outro texto é buscado no geocodificador.
+  const known = findCity(cityQuery);
+  const coords = known ? { latitude: known.lat, longitude: known.lon } : await fetchCoordinates(cityQuery);
   if (coords) {
     observation.tz = timezoneFor(coords.latitude, coords.longitude);
     observation.latitude = coords.latitude;
@@ -562,4 +574,12 @@ $('update-sky').addEventListener('click', async () => {
   }
 
   instance.refresh();
+});
+
+/* ---------- Campo de cidade: lista por país + texto livre ---------- */
+initCityPicker({
+  input: $('location'),
+  list: $('city-list'),
+  toggle: $('city-toggle'),
+  onSubmit: () => $('update-sky').click()
 });

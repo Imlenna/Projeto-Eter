@@ -15,7 +15,13 @@
     </header>
 
     <section class="controls" aria-label="Configurações do céu">
-      <label>Cidade <input id="location" value="São Paulo, SP, Brasil" placeholder="Ex: Paris, Tóquio, Nova York" /></label>
+      <label>Cidade
+        <span class="combo">
+          <input id="location" value="São Paulo" placeholder="Digite uma cidade ou escolha na lista" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="city-list" />
+          <button id="city-toggle" class="combo-toggle" type="button" aria-label="Mostrar lista de cidades" title="Cidades sugeridas">▾</button>
+          <span id="city-list" class="combo-list hidden" role="listbox"></span>
+        </span>
+      </label>
       <label>Data <input id="date" type="date" value="2026-10-20" /></label>
       <label>Horário <input id="time" type="time" value="22:00" /></label>
       <button id="update-sky" type="button">Atualizar céu</button>
@@ -25,7 +31,7 @@
       <div class="sky-card">
         <div class="sky-card-heading">
           <div>
-            <h2>Seu mapa das estrelas</h2>
+            <h2>Seu céu</h2>
             <p id="sky-caption">20 de outubro de 2026 · 22:00 · São Paulo</p>
           </div>
 
