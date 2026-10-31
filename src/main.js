@@ -1,6 +1,6 @@
 import p5 from 'p5';
 import tzlookup from 'tz-lookup';
-import { findCity } from './cities.js';
+import { findCity, CITY_GROUPS, cityLabel } from './cities.js';
 import { initCityPicker } from './city-picker.js';
 import * as Astronomy from 'astronomy-engine';
 import './style.css';
@@ -28,6 +28,10 @@ const DEFAULTS = {
 const DATA_URL = `${import.meta.env.BASE_URL}data/`;
 const COMPASS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
 const AU_KM = 149597870.7;
+
+// Raio (em km) para considerar que a localização do IP "é" uma cidade da lista do cities.js.
+// Diminua (ex.: 15) se quiser que cidades vizinhas, como Guarulhos, não virem a capital.
+const NEAREST_CITY_KM = 50;
 
 const $ = id => document.getElementById(id);
 const flag = id => $(id)?.checked ?? true;
@@ -94,45 +98,96 @@ async function fetchCoordinates(cityName) {
   }
 }
 
-/* ---------- Localização do visitante ---------- */
+/* ---------- Localização do visitante (por IP, sem pedir permissão) ---------- */
 let detectedPlace = null;
 
-async function reverseGeocode(lat, lon) {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&accept-language=pt-BR&lat=${lat}&lon=${lon}`
-    );
-    const data = await res.json();
-    const a = data.address || {};
-    const city = a.city || a.town || a.village || a.municipality || a.county;
-    return [city, a.country].filter(Boolean).join(', ') || null;
-  } catch {
-    return null;
+async function locateByIP() {
+  const sources = [
+    async () => {
+      const d = await (await fetch('https://ipwho.is/?lang=pt-BR')).json();
+      if (!d.success) throw new Error('ipwho.is falhou');
+      return { latitude: d.latitude, longitude: d.longitude, city: d.city, country: d.country };
+    },
+    async () => {
+      const d = await (await fetch('https://ipapi.co/json/')).json();
+      if (d.error) throw new Error('ipapi.co falhou');
+      return { latitude: d.latitude, longitude: d.longitude, city: d.city, country: d.country_name };
+    }
+  ];
+
+  for (const source of sources) {
+    try {
+      const place = await source();
+      // O nome da cidade é opcional: o que importa são as coordenadas
+      if (Number.isFinite(place.latitude) && Number.isFinite(place.longitude)) return place;
+    } catch { /* tenta a próxima fonte */ }
   }
+  return null;
 }
 
-function detectUserLocation() {
-  if (!navigator.geolocation) return;
+// Distância entre dois pontos da Terra, em km (fórmula de Haversine)
+const toRad = d => d * Math.PI / 180;
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(a));
+}
 
-  navigator.geolocation.getCurrentPosition(
-    async pos => {
-      const { latitude, longitude, altitude } = pos.coords;
-      const name = await reverseGeocode(latitude, longitude);
-      if (!name) return; // sem nome de cidade, mantém o padrão
+// Cidade da lista (cities.js) mais próxima das coordenadas, se estiver dentro do raio
+function nearestListedCity(lat, lon, maxKm = NEAREST_CITY_KM) {
+  let best = null, bestDist = Infinity;
+  for (const g of CITY_GROUPS) {
+    for (const c of g.cities) {
+      const d = distanceKm(lat, lon, c.lat, c.lon);
+      if (d < bestDist) { bestDist = d; best = { city: c, country: g.country }; }
+    }
+  }
+  return best && bestDist <= maxKm ? best : null;
+}
 
-      observation.latitude = latitude;
-      observation.longitude = longitude;
-      observation.elevation = altitude ?? 0;
-      observation.tz = timezoneFor(latitude, longitude);
-      observation.location = name;
-      detectedPlace = { latitude, longitude, location: name };
+// Nomes que o serviço de IP devolve no lugar da cidade
+const CITY_ALIASES = {
+  'distrito federal': 'Brasília',
+  'federal district': 'Brasília',
+  'brasilia': 'Brasília'
+};
 
-      $('location').value = name;
-      instance.refresh();
-    },
-    () => { /* permissão negada ou erro: mantém São Paulo */ },
-    { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
-  );
+const normalizeKey = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+// Remove prefixos administrativos como "Região Geográfica Imediata de ..." e deixa só a cidade
+const cleanCityName = name => {
+  const cleaned = (name || '')
+    .replace(/^\s*(Regi[aã]o\s+Geogr[aá]fica\s+(Imediata|Intermedi[aá]ria)|Microrregi[aã]o|Mesorregi[aã]o|Regi[aã]o\s+Metropolitana)\s+(de|do|da|dos|das)\s+/i, '')
+    .replace(/^\s*(Municipality|Municipio|Munic[ií]pio)\s+(of|de|do|da)\s+/i, '')
+    .trim();
+  return CITY_ALIASES[normalizeKey(cleaned)] || cleaned;
+};
+
+async function detectUserLocation() {
+  const place = await locateByIP();
+  if (!place) return; // sem resposta, mantém São Paulo
+
+  // 1) Prefere o nome de uma cidade da lista que esteja perto das coordenadas do IP
+  const listed = nearestListedCity(place.latitude, place.longitude);
+  let name;
+  if (listed) {
+    name = cityLabel(listed.city, listed.country);
+  } else {
+    // 2) Sem cidade da lista por perto, usa o nome do serviço (limpo)
+    const city = cleanCityName(place.city);
+    if (!city) return; // sem nome utilizável, mantém São Paulo
+    name = [city, place.country].filter(Boolean).join(', ');
+  }
+
+  observation.latitude = place.latitude;
+  observation.longitude = place.longitude;
+  observation.elevation = 0;
+  observation.tz = timezoneFor(place.latitude, place.longitude);
+  observation.location = name;
+  detectedPlace = { latitude: place.latitude, longitude: place.longitude, location: name };
+
+  $('location').value = name;
+  instance.refresh();
 }
 
 /* ---------- Catálogo ---------- */
