@@ -372,3 +372,22 @@ footer {
 }
 .combo-item:hover, .combo-item.active { background: rgba(147, 51, 234, 0.35); }
 .combo-empty { padding: 12px 10px; color: #cbd5e1; font-size: 12px; line-height: 1.5; }
+
+/* Bloco de curiosidades */
+.curio-box {
+  margin-top: 22px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: rgba(147, 51, 234, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+.curio-box.hidden { display: none; }
+.curio-box h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #c084fc;
+}
+.curio-box p { margin: 0; color: #e2e8f0; font-size: 13px; line-height: 1.7; }

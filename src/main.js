@@ -5,8 +5,26 @@ import { initCityPicker } from './city-picker.js';
 import * as Astronomy from 'astronomy-engine';
 import './style.css';
 import { CONST_PT, CONST_DESC, ZODIAC, STAR_INFO, NEARBY_EXTRA, BODIES } from './data.js';
+import {
+  CONST_CURIO, CONST_CURIO_DEFAULT, STAR_CURIO, STAR_CURIO_DEFAULT, NEARBY_CURIO, BODY_CURIO
+} from './curiosities.js';
 
-const DEFAULTS = { latitude: -23.55, longitude: -46.63, elevation: 760, location: 'São Paulo, SP, Brasil', tz: 'America/Sao_Paulo', date: '2026-10-20', time: '22:00' };
+// Pega a data e hora atual do usuário que está acessando o site
+const now = new Date();
+const pad = n => String(n).padStart(2, '0');
+const currentLocalDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+const currentLocalTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+const DEFAULTS = {
+  latitude: -23.55,
+  longitude: -46.63,
+  elevation: 760,
+  location: 'São Paulo, SP, Brasil',
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
+  date: currentLocalDate,
+  time: currentLocalTime
+};
+
 const DATA_URL = `${import.meta.env.BASE_URL}data/`;
 const COMPASS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
 const AU_KM = 149597870.7;
@@ -76,6 +94,47 @@ async function fetchCoordinates(cityName) {
   }
 }
 
+/* ---------- Localização do visitante ---------- */
+let detectedPlace = null;
+
+async function reverseGeocode(lat, lon) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&accept-language=pt-BR&lat=${lat}&lon=${lon}`
+    );
+    const data = await res.json();
+    const a = data.address || {};
+    const city = a.city || a.town || a.village || a.municipality || a.county;
+    return [city, a.country].filter(Boolean).join(', ') || null;
+  } catch {
+    return null;
+  }
+}
+
+function detectUserLocation() {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(
+    async pos => {
+      const { latitude, longitude, altitude } = pos.coords;
+      const name = await reverseGeocode(latitude, longitude);
+      if (!name) return; // sem nome de cidade, mantém o padrão
+
+      observation.latitude = latitude;
+      observation.longitude = longitude;
+      observation.elevation = altitude ?? 0;
+      observation.tz = timezoneFor(latitude, longitude);
+      observation.location = name;
+      detectedPlace = { latitude, longitude, location: name };
+
+      $('location').value = name;
+      instance.refresh();
+    },
+    () => { /* permissão negada ou erro: mantém São Paulo */ },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
+  );
+}
+
 /* ---------- Catálogo ---------- */
 async function loadCatalog() {
   const files = ['stars.json', 'constellations.lines.json', 'constellations.json'];
@@ -84,7 +143,6 @@ async function loadCatalog() {
   );
   const toRaDec = ([lon, lat]) => ({ ra: ((lon + 360) % 360) / 15, dec: lat });
 
-  // Função auxiliar para injetar propriedades de piscar (twinkling) em estrelas
   const createTwinkle = () => ({
     alpha: Math.random() * 150 + 100,
     twinkleSpeed: (Math.random() * 2 + 0.5) * (Math.random() < 0.5 ? 1 : -1)
@@ -135,7 +193,6 @@ function buildSky() {
 
   sky = {
     stars: catalog.stars.map(s => ({ ...s, ...place(s.ra, s.dec) })).filter(s => s.alt > -10),
-    // Estrelas próximas agora recebem propriedades de twinkling integradas
     nearby: NEARBY_EXTRA.map(n => ({
       ...n,
       kind: 'nearby',
@@ -169,17 +226,30 @@ const moonPhaseName = a => ['Lua nova', 'Lua crescente', 'Quarto crescente', 'Cr
 const whereText = o => (o.alt > 0 ? `${Math.round(o.alt)}° de altitude, direção ${dirOf(o.az)}` : 'abaixo do horizonte agora');
 const magText = m => (m == null ? null : m.toFixed(2).replace('.', ','));
 
+// Função auxiliar para limpar marcações de citação técnicas do texto
+const cleanText = text =>
+  text
+    ? text
+        .replace(/\[cite(?:_start|_end)?[^\]]*\]/gi, '')
+        .replace(/\[\d+(?:\s*,\s*\d+)*\]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+    : '';
+
 function describe(o) {
   const facts = [];
-  const add = (k, v) => { if (v != null && v !== '') facts.push([k, v]); };
+  const add = (k, v) => { if (v != null && v !== '') facts.push([k, cleanText(v)]); };
 
   if (o.kind === 'constellation') {
     const sym = o.id;
+    add('Posição agora', whereText(o));
     add('Sigla IAU', sym);
     add('Nome em inglês', o.en);
     add('Zodíaco', ZODIAC.has(sym) ? 'Sim' : 'Não');
-    add('Posição agora', whereText(o));
-    return { kind: 'Constelação', title: conName(sym), facts, text: CONST_DESC[sym] || `${conName(sym)} é uma das 88 constelações oficiais.` };
+
+    const text = CONST_DESC[sym] || `Representa figuras mitológicas e celestes ancestrais associadas à história de ${conName(sym)}.`;
+    const curio = CONST_CURIO[sym] || CONST_CURIO_DEFAULT;
+    return { kind: 'Constelação', title: conName(sym), facts, text: cleanText(text), curio: cleanText(curio) };
   }
 
   if (o.kind === 'body') {
@@ -193,41 +263,56 @@ function describe(o) {
       add('Distância da Terra', `${o.dist.toFixed(2).replace('.', ',')} UA`);
     }
     if (o.body !== 'Moon') add('Magnitude', magText(o.mag));
-    return { kind: o.body === 'Sun' || o.body === 'Moon' ? 'Astro' : 'Planeta', title: o.name, text: o.desc, facts };
+    return {
+      kind: o.body === 'Sun' || o.body === 'Moon' ? 'Astro' : 'Planeta',
+      title: o.name,
+      text: cleanText(o.desc),
+      facts,
+      curio: cleanText(BODY_CURIO[o.id])
+    };
   }
 
   if (o.kind === 'nearby') {
+    add('Posição agora', whereText(o));
     add('Distância', `${String(o.ly).replace('.', ',')} anos-luz`);
     add('Magnitude', magText(o.mag));
     add('Classe espectral', o.cls);
     add('Constelação', conName(o.con));
-    add('Posição agora', whereText(o));
-    return { kind: 'Estrela próxima', title: o.name, text: `${o.desc} Invisível a olho nu.`, facts };
+    const text = `${o.desc} Estrela vizinha de grande interesse astrométrico. Invisível a olho nu.`;
+    return { kind: 'Estrela próxima', title: o.name, text: cleanText(text), facts, curio: cleanText(NEARBY_CURIO[o.id]) };
   }
 
   const info = STAR_INFO[o.hip];
   const sym = Astronomy.Constellation(o.ra, o.dec).symbol;
   const near = info && info.ly <= 26;
+
+  add('Posição agora', whereText(o));
   add('Magnitude', magText(o.mag));
   add('Constelação', conName(sym));
-  add('Distância', info ? `cerca de ${String(info.ly).replace('.', ',')} anos-luz` : null);
-  add('Classe espectral', info?.cls);
-  add('Posição agora', whereText(o));
+  add('Distância', info ? `cerca de ${String(info.ly).replace('.', ',')} anos-luz` : 'Distância estelar profunda');
+  add('Classe espectral', info?.cls || 'Não especificada');
+
+  let text = info?.desc || `Estrela catalogada pelo satélite astrométrico Hipparcos (HIP ${o.hip}). Objeto de destaque no firmamento celeste.`;
+  if (near) text += ' Faz parte do seleto grupo de estrelas vizinhas mais próximas do Sistema Solar.';
+
   const title = info?.name || `HIP ${o.hip}`;
-  let text = info?.desc || `Estrela do catálogo Hipparcos (HIP ${o.hip}).`;
-  if (near) text += ` Está entre as estrelas mais próximas do Sol.`;
-  return { kind: near ? 'Estrela próxima' : 'Estrela', title, text, facts };
+  const curio = STAR_CURIO[o.hip] || STAR_CURIO_DEFAULT;
+  return { kind: near ? 'Estrela próxima' : 'Estrela', title, text: cleanText(text), facts, curio: cleanText(curio) };
 }
 
 function showInfo(o) {
   const dl = $('object-facts');
+  const curioBox = $('object-curio-box');
   dl.replaceChildren();
+
   if (!o) {
     $('object-kind').textContent = 'OBJETO SELECIONADO';
     $('object-name').textContent = 'Explore o mapa';
     $('object-description').textContent = 'Clique em um planeta, constelação ou estrela próxima. No celular, use dois dedos ou os botões + e − para ampliar.';
+    curioBox.classList.add('hidden');
     return;
   }
+
   const d = describe(o);
   $('object-kind').textContent = d.kind.toUpperCase();
   $('object-name').textContent = d.title;
@@ -236,6 +321,13 @@ function showInfo(o) {
     const dt = document.createElement('dt'); dt.textContent = k;
     const dd = document.createElement('dd'); dd.textContent = v;
     dl.append(dt, dd);
+  }
+
+  if (d.curio) {
+    $('object-curio').textContent = d.curio;
+    curioBox.classList.remove('hidden');
+  } else {
+    curioBox.classList.add('hidden');
   }
 }
 
@@ -408,7 +500,6 @@ function sketch(p) {
       const pos = project(s);
       if (!inView(pos.x, pos.y, 8)) continue;
 
-      // Twinkling orgânico
       s.alpha += s.twinkleSpeed;
       if (s.alpha > 255) { s.alpha = 255; s.twinkleSpeed = -Math.abs(s.twinkleSpeed); }
       else if (s.alpha < 60) { s.alpha = 60; s.twinkleSpeed = Math.abs(s.twinkleSpeed); }
@@ -427,6 +518,9 @@ function sketch(p) {
       const info = STAR_INFO[s.hip];
       const near = info && info.ly <= 26;
       const h = { obj: s, x: pos.x, y: pos.y, reach: Math.max(8, size / 2 + 5) };
+
+      hits.stars.push(h);
+
       if (near) hits.bright.push(h);
       if (near && flag('toggle-nearby')) { p.noFill(); p.stroke('#7fe3d2'); p.strokeWeight(1); p.circle(pos.x, pos.y, size + 8); p.noStroke(); }
       if (flag('toggle-names') && info && s.mag < (compact ? 1.2 : 2.3)) queue.push({ text: info.name.split(' (')[0], x: pos.x + size / 2 + 5, y: pos.y - 5, align: 'left', size: fs(), fill: [232, 236, 255, 190], prio: 2 });
@@ -438,12 +532,10 @@ function sketch(p) {
         const pos = project(n);
         if (!inView(pos.x, pos.y, 8)) continue;
 
-        // Estrelas próximas agora também PISCAM (mesma lógica das constelações)
         n.alpha += n.twinkleSpeed;
         if (n.alpha > 255) { n.alpha = 255; n.twinkleSpeed = -Math.abs(n.twinkleSpeed); }
         else if (n.alpha < 60) { n.alpha = 60; n.twinkleSpeed = Math.abs(n.twinkleSpeed); }
 
-        // Anel indicador verde-água piscando suavemente junto com a estrela
         p.noFill();
         p.stroke(127, 227, 210, n.alpha);
         p.strokeWeight(1.1);
@@ -467,7 +559,6 @@ function sketch(p) {
       }
     }
 
-    // Renderização dos Planetas com TEXTURA REALISTA SUAVE (Gradiente refinado e sem estouros)
     for (const b of sky.bodies) {
       const isSunMoon = b.body === 'Sun' || b.body === 'Moon';
       if (isSunMoon && !flag('toggle-sunmoon')) continue;
@@ -483,24 +574,21 @@ function sketch(p) {
       let radius = size / 2;
       let gradCtx = ctx;
 
-      // Gradiente suave em tom 3D elegante (iluminação lateral limpa, sem centro forçado/estourado)
       let gradient = gradCtx.createRadialGradient(
         -radius * 0.35, -radius * 0.35, radius * 0.1,
         0, 0, radius * 1.05
       );
 
-      // Mistura limpa com a cor original do planeta para evitar aspecto "ruim"
-      gradient.addColorStop(0, '#f8fafc');       // Luz de brilho sutil (quase branca)
-      gradient.addColorStop(0.4, b.color);       // Cor original principal do planeta
-      gradient.addColorStop(0.85, '#0f172a');    // Sombra suave na curvatura
-      gradient.addColorStop(1, '#020617');       // Contorno escuro profundo
+      gradient.addColorStop(0, '#f8fafc');
+      gradient.addColorStop(0.4, b.color);
+      gradient.addColorStop(0.85, '#0f172a');
+      gradient.addColorStop(1, '#020617');
 
       gradCtx.fillStyle = gradient;
       gradCtx.beginPath();
       gradCtx.arc(0, 0, radius, 0, Math.PI * 2);
       gradCtx.fill();
 
-      // Atmosfera / Halo externo leve e sofisticado
       p.noFill();
       p.stroke(b.color);
       p.strokeWeight(0.6);
@@ -597,6 +685,7 @@ function sketch(p) {
     return validBody
       ?? nearest(hits.nearby, x, y)
       ?? nearest(hits.bright, x, y, h => h.obj.mag)
+      ?? nearest(hits.stars, x, y, h => h.obj.mag)
       ?? pickConstellation(x, y)
       ?? nearest(hits.labels, x, y);
   }
@@ -614,6 +703,9 @@ const instance = new p5(sketch);
 $('zoom-in').addEventListener('click', () => instance.zoomBy(1.6));
 $('zoom-out').addEventListener('click', () => instance.zoomBy(1 / 1.6));
 $('zoom-reset').addEventListener('click', () => instance.resetView());
+
+$('date').value = DEFAULTS.date;
+$('time').value = DEFAULTS.time;
 
 $('download-sky').addEventListener('click', () => {
   const button = $('download-sky');
@@ -673,7 +765,11 @@ $('update-sky').addEventListener('click', async () => {
   observation.time = $('time').value || DEFAULTS.time;
 
   const known = findCity(cityQuery);
-  const coords = known ? { latitude: known.lat, longitude: known.lon } : await fetchCoordinates(cityQuery);
+  const coords = known
+    ? { latitude: known.lat, longitude: known.lon }
+    : (detectedPlace && cityQuery === detectedPlace.location)
+      ? detectedPlace
+      : await fetchCoordinates(cityQuery);
   if (coords) {
     observation.tz = timezoneFor(coords.latitude, coords.longitude);
     observation.latitude = coords.latitude;
@@ -690,3 +786,5 @@ initCityPicker({
   toggle: $('city-toggle'),
   onSubmit: () => $('update-sky').click()
 });
+
+detectUserLocation();
